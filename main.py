@@ -4,6 +4,7 @@ import base64
 
 import numpy as np
 import streamlit as st
+TF_USE_LEGACY_KERAS=1
 from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing import sequence
 from tensorflow.keras.models import load_model
