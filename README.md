@@ -57,10 +57,31 @@ Movie-Sentiment-analyzer/
 
 ## 📊 Results
 
-- **Best validation accuracy:** 85.4% (epoch 3; early stopping restored these weights)
-- **Test accuracy:** run `python evaluate.py` to compute accuracy, confusion matrix and precision/recall on the 25,000-review test set
+Evaluated on the held-out **IMDB test set (25,000 reviews)** with `python evaluate.py`:
 
-Training accuracy continued rising to ~95% after epoch 3 while validation loss increased, indicating overfitting — which early stopping prevented from reaching the saved model.
+| Metric | Value |
+|---|---|
+| **Test accuracy** | **84.0%** |
+| Macro F1-score | 0.840 |
+| Best validation accuracy | 85.4% (epoch 3) |
+
+| Class | Precision | Recall | F1-score |
+|---|---|---|---|
+| Negative | 0.815 | 0.881 | 0.846 |
+| Positive | 0.870 | 0.800 | 0.834 |
+
+**Confusion matrix**
+
+| | Predicted Negative | Predicted Positive |
+|---|---|---|
+| **Actual Negative** | 11,008 | 1,492 |
+| **Actual Positive** | 2,503 | 9,997 |
+
+**Observations**
+
+- Test accuracy (84.0%) is close to validation accuracy (85.4%), so the model generalizes to unseen reviews.
+- Training accuracy kept rising to ~95% after epoch 3 while validation loss increased, indicating overfitting — early stopping restored the epoch-3 weights.
+- The model leans towards predicting **Negative**: it misses 20% of positive reviews (2,503 false negatives) but only 12% of negative ones (1,492 false positives). Tuning the 0.5 decision threshold or using a gated model (LSTM/GRU) could balance this.
 
 ## 💻 Run locally
 
