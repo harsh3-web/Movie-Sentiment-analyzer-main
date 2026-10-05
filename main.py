@@ -1,10 +1,15 @@
 import os
+
+# Must be set BEFORE TensorFlow is imported.
+# On TF 2.16+ this makes tf.keras use legacy Keras 2 (tf-keras package),
+# which can load the .h5 model saved with TF 2.15. Harmless on TF 2.15.
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+
 import re
 import base64
 
 import numpy as np
 import streamlit as st
-TF_USE_LEGACY_KERAS=1
 from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing import sequence
 from tensorflow.keras.models import load_model
