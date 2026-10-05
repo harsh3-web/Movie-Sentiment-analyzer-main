@@ -1,3 +1,4 @@
 tensorflow==2.15.0
-numpy 
-streamlit
+numpy<2
+streamlit>=1.29
+scikit-learn

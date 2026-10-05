@@ -1,47 +1,98 @@
+import os
+import re
+import base64
+
 import numpy as np
-import tensorflow as tf
+import streamlit as st
 from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing import sequence
 from tensorflow.keras.models import load_model
-import streamlit as st
-import base64
 
-# --- Load base64 background image ---
+# --- Constants (must match training in SimpleRNN/simplernn.ipynb) ---
+VOCAB_SIZE = 10000      # num_words used in imdb.load_data
+MAX_LEN = 500           # maxlen used in pad_sequences
+INDEX_OFFSET = 3        # IMDB reserves 0=padding, 1=start, 2=unknown
+PAD, START, OOV = 0, 1, 2
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "SimpleRNN", "simple_rnn_imdb.h5")
+BG_IMAGE_PATH = os.path.join(BASE_DIR, "Movie Review.jpg")
+
+st.set_page_config(page_title="Movie Review Sentiment Analyzer", page_icon="🎬", layout="centered")
+
+
+# --- Cached resources: loaded once, not on every button click ---
+@st.cache_resource
+def load_resources():
+    model = load_model(MODEL_PATH)
+    word_index = imdb.get_word_index()
+    return model, word_index
+
+
+@st.cache_data
 def get_base64_of_local_image(image_path):
+    if not os.path.exists(image_path):
+        return None
     with open(image_path, "rb") as img_file:
-        data = img_file.read()
-    return base64.b64encode(data).decode()
+        return base64.b64encode(img_file.read()).decode()
 
-bg_image = get_base64_of_local_image("Movie Review.jpg")  # Local image path
 
-# --- Load IMDB word index and model ---
-word_index = imdb.get_word_index()
-reverse_word_index = {v: k for k, v in word_index.items()}
-model = load_model('SimpleRNN/simple_rnn_imdb.h5')  # Adjust if path is different
+model, word_index = load_resources()
 
-# --- Text Preprocessing ---
+
+# --- Text preprocessing (mirrors how the IMDB training data was encoded) ---
+def tokenize(text):
+    # Lowercase and keep only letters, digits and apostrophes,
+    # so "fantastic." and "fantastic" map to the same word.
+    return re.findall(r"[a-z0-9']+", text.lower())
+
+
+def encode_word(word):
+    idx = word_index.get(word)
+    if idx is None:
+        return OOV                      # word never seen in IMDB vocabulary
+    idx += INDEX_OFFSET
+    if idx >= VOCAB_SIZE:
+        return OOV                      # rare word outside the top-10k used in training
+    return idx
+
+
 def preprocess_text(text):
-    words = text.lower().split()
-    encoded = [word_index.get(w, 2) + 3 for w in words]
-    return sequence.pad_sequences([encoded], maxlen=500)
+    words = tokenize(text)
+    encoded = [START] + [encode_word(w) for w in words]   # training sequences start with 1
+    padded = sequence.pad_sequences(
+        [encoded], maxlen=MAX_LEN, padding="pre", truncating="pre", value=PAD
+    )
+    known = sum(1 for idx in encoded[1:] if idx != OOV)
+    return padded, len(words), known
 
-# --- Sentiment Prediction ---
+
+# --- Prediction ---
 def predict_sentiment(text):
-    data = preprocess_text(text)
-    score = float(model.predict(data)[0][0])
-    return ('Positive' if score > 0.5 else 'Negative'), score
+    data, n_words, n_known = preprocess_text(text)
+    prob_positive = float(model.predict(data, verbose=0)[0][0])
+    sentiment = "Positive" if prob_positive > 0.5 else "Negative"
+    confidence = prob_positive if sentiment == "Positive" else 1.0 - prob_positive
+    return sentiment, confidence, prob_positive, n_words, n_known
 
-# --- Streamlit Page Config ---
-st.set_page_config(page_title="🎬 Movie Review Sentiment Analyzer", layout="centered")
 
-# --- Background and Styling ---
+# --- Styling ---
+bg_image = get_base64_of_local_image(BG_IMAGE_PATH)
+bg_css = (
+    f"""
+    background-image: url("data:image/jpg;base64,{bg_image}");
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    """
+    if bg_image
+    else "background-color: #141414;"
+)
+
 st.markdown(f"""
     <style>
     .stApp {{
-        background-image: url("data:image/jpg;base64,{bg_image}");
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
+        {bg_css}
         color: white;
     }}
     .title-box {{
@@ -81,31 +132,47 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Title Box ---
+# --- Title ---
 st.markdown("""
     <div class="title-box">
         <h1>🎬 Movie Review Sentiment Analyzer</h1>
         <div class="description">
-            This analyzer uses a SimpleRNN model trained on IMDB data.<br>
-            Enter any movie review to see whether it’s classified as <strong>Positive</strong> or <strong>Negative</strong>.
+            A SimpleRNN model trained on 25,000 IMDB reviews.<br>
+            Enter any movie review to see whether it's classified as <strong>Positive</strong> or <strong>Negative</strong>.
         </div>
     </div>
 """, unsafe_allow_html=True)
 
-# --- Input Field and Prediction ---
+# --- Input and prediction ---
 user_input = st.text_area("📝 Enter your movie review:", height=200)
 
 if st.button("Analyze Review"):
-    if user_input.strip():
-        sentiment, score = predict_sentiment(user_input)
-        st.success(f"Sentiment: **{sentiment}**")
-        st.info(f"Confidence Score: `{score:.4f}`")
-    else:
+    if not user_input.strip():
         st.warning("Please enter a review before analyzing.")
+    else:
+        sentiment, confidence, prob_positive, n_words, n_known = predict_sentiment(user_input)
+
+        if n_known == 0:
+            st.warning("None of the words in this review are in the model's vocabulary, "
+                       "so the prediction is not meaningful.")
+
+        if sentiment == "Positive":
+            st.success(f"Sentiment: **{sentiment}** 😊")
+        else:
+            st.error(f"Sentiment: **{sentiment}** 😞")
+
+        st.progress(confidence, text=f"Confidence: {confidence:.1%}")
+
+        with st.expander("Details"):
+            st.write(f"P(positive) from sigmoid output: `{prob_positive:.4f}`")
+            st.write(f"Words in review: `{n_words}`  |  recognised by model: `{n_known}`")
+            if n_words > MAX_LEN - 1:
+                st.write(f"Review was longer than {MAX_LEN - 1} words, so only the last "
+                         f"{MAX_LEN - 1} were used.")
 
 # --- Footer ---
 st.markdown("""
     <div class="footer">
-        © 2025 Movie Sentiment Analyzer | Developed using Streamlit & TensorFlow | created by Suryansh Tripathi
+        © 2025 Movie Sentiment Analyzer | Built with Streamlit & TensorFlow | Harsh Sharma, IIT Bhubaneswar
     </div>
 """, unsafe_allow_html=True)

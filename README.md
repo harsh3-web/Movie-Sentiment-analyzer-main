@@ -1,90 +1,104 @@
-# 🎬 Movie Sentiment Analyzer 🎭
+# 🎬 Movie Sentiment Analyzer
 
-A Streamlit web application that performs **sentiment analysis** on movie reviews using a trained machine learning model. The tool predicts whether a review expresses a **positive** or **negative** sentiment.
+A Streamlit web app that classifies movie reviews as **Positive** or **Negative** using a **Simple Recurrent Neural Network (SimpleRNN)** trained on the IMDB reviews dataset with TensorFlow/Keras.
 
-## 🚀 Demo
+🌐 **Live app:** https://movie-sentiment-analyzer-001.streamlit.app/
 
-🌐 Live App: https://movie-sentiment-analyzer-001.streamlit.app/
 ## 🧠 Features
 
-- Accepts user input as plain text movie reviews.
-- Analyzes and classifies sentiment in real-time.
-- Uses a pre-trained `TfidfVectorizer` and `LogisticRegression` model.
-- User-friendly interface built with **Streamlit**.
+- Type any movie review and get a real-time sentiment prediction
+- Shows a confidence score and the raw sigmoid probability
+- Robust preprocessing: punctuation handling, out-of-vocabulary words mapped to the unknown token, same encoding as training
+- Model and vocabulary cached so they load only once
+- End-to-end pipeline: data loading → preprocessing → training → evaluation → deployment
 
-## 📂 Project Structure
+## 📂 Project structure
 
+```
 Movie-Sentiment-analyzer/
-├── main.py # Streamlit app
-├── movie_sentiment.pkl # Trained logistic regression model
-├── tfidf_vectorizer.pkl # TF-IDF vectorizer
-├── requirements.txt # Dependencies
-└── README.md # Project documentation
+├── main.py                     # Streamlit app (inference)
+├── evaluate.py                 # Evaluates the saved model on the IMDB test set
+├── SimpleRNN/
+│   ├── simplernn.ipynb         # Data prep, model building, training
+│   ├── embedding.ipynb         # Exploration of one-hot encoding and word embeddings
+│   ├── prediction.ipynb        # Loading the model and testing predictions
+│   └── simple_rnn_imdb.h5      # Trained model
+├── Movie Review.jpg            # App background image
+├── requirements.txt
+├── runtime.txt
+└── README.md
+```
 
-markdown
-Copy code
+## 🔄 How it works
 
-## 🧪 How It Works
+### Training (`SimpleRNN/simplernn.ipynb`)
 
-1. The user inputs a movie review.
-2. The text is transformed using a `TfidfVectorizer`.
-3. The resulting features are passed to a `LogisticRegression` classifier.
-4. The app displays whether the sentiment is **Positive** or **Negative**.
+1. **Data:** IMDB dataset via `keras.datasets.imdb` — 25,000 training and 25,000 test reviews, balanced 50/50, restricted to the 10,000 most frequent words.
+2. **Padding:** every review padded/truncated to 500 tokens (pre-padding, so the RNN reads real words last).
+3. **Model:**
 
-## 📌 Technologies Used
+| Layer | Output shape | Parameters |
+|---|---|---|
+| Embedding (10,000 → 128) | (None, 500, 128) | 1,280,000 |
+| SimpleRNN (128 units, ReLU) | (None, 128) | 32,896 |
+| Dense (1, sigmoid) | (None, 1) | 129 |
+| **Total** | | **1,313,025** |
 
-- **Python 3.10**
-- **Streamlit** – for frontend deployment
-- **Scikit-learn** – for training model and vectorizer
-- **Pandas, Numpy** – for data handling
-- **Pickle** – to load serialized models
+4. **Training:** Adam optimizer, binary cross-entropy loss, batch size 32, 20% validation split, `EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)`.
+5. **Saved** as `simple_rnn_imdb.h5`.
 
-## 💻 Run Locally
+### Inference (`main.py`)
 
-1. Clone the repository:
+1. User enters a review in the Streamlit text area.
+2. Text is lowercased and tokenized (punctuation removed).
+3. Each word is mapped to its IMDB index + 3; unknown or rare (outside top 10k) words map to the unknown token `2`; a start token `1` is prepended — exactly as in the training data.
+4. Sequence is padded to 500 tokens.
+5. The model outputs P(positive). Score > 0.5 → **Positive**, otherwise **Negative**. Confidence = P for positive, 1 − P for negative.
+
+## 📊 Results
+
+- **Best validation accuracy:** 85.4% (epoch 3; early stopping restored these weights)
+- **Test accuracy:** run `python evaluate.py` to compute accuracy, confusion matrix and precision/recall on the 25,000-review test set
+
+Training accuracy continued rising to ~95% after epoch 3 while validation loss increased, indicating overfitting — which early stopping prevented from reaching the saved model.
+
+## 💻 Run locally
 
 ```bash
-git clone https://github.com/surya01t/Movie-Sentiment-analyzer.git
-cd Movie-Sentiment-analyzer
-(Optional) Create and activate a virtual environment:
+git clone https://github.com/harsh3-web/Movie-Sentiment-analyzer-main.git
+cd Movie-Sentiment-analyzer-main
 
-bash
-Copy code
 python -m venv venv
-source venv/bin/activate     # macOS/Linux
-venv\Scripts\activate        # Windows
-Install the dependencies:
+source venv/bin/activate        # macOS/Linux
+venv\Scripts\activate           # Windows
 
-bash
-Copy code
 pip install -r requirements.txt
-Run the app:
-
-bash
-Copy code
 streamlit run main.py
-🔍 Model Information
-Vectorizer: TF-IDF
+```
 
-Classifier: Logistic Regression
+To evaluate the model on the test set:
 
-Dataset: Preprocessed dataset of labeled movie reviews
+```bash
+python evaluate.py
+```
 
-Accuracy: ~87% on validation set
+## 📝 Example
 
-📝 Example Usage
-Input:
+**Input:** "This movie had stunning visuals and a brilliant performance by the lead actor."
+**Output:** ✅ Positive
 
-"This movie had stunning visuals and a brilliant performance by the lead actor."
+## ⚠️ Limitations and future work
 
-Output:
+- **Vanishing gradients:** SimpleRNN struggles to retain information over 500 timesteps; LSTM or GRU layers would capture long-range context better.
+- **Training stability:** the ReLU-activated RNN showed a very high first-epoch loss; `tanh` activation or gradient clipping would stabilize training.
+- **Overfitting:** dropout / recurrent dropout could improve generalization.
+- **Stronger models:** a bidirectional LSTM or a fine-tuned transformer (e.g. DistilBERT) typically reaches 90%+ on IMDB.
+- **Domain:** trained only on IMDB movie reviews; may not generalize to other kinds of text, sarcasm, or very short inputs.
 
-✅ Positive
+## 🛠️ Tech stack
 
-✍️ Author
-Harsh Sharma
-🎓 IIT Bhubaneswar
-📬 Your Email or LinkedIn
+Python 3.10 · TensorFlow / Keras 2.15 · NumPy · scikit-learn (evaluation) · Streamlit
 
-🌟 Support
-If you find this project useful, consider giving it a ⭐️ star!
+## ✍️ Author
+
+**Harsh Sharma** — B.Tech/M.Tech Dual Degree, Civil Engineering, IIT Bhubaneswar
