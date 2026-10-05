@@ -82,7 +82,7 @@ Output:
 ✅ Positive
 
 ✍️ Author
-Suryansh Tripathi
+Harsh Sharma
 🎓 IIT Bhubaneswar
 📬 Your Email or LinkedIn
 
