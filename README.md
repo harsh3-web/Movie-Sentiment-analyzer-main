@@ -2,7 +2,7 @@
 
 A Streamlit web app that classifies movie reviews as **Positive** or **Negative** using a **Simple Recurrent Neural Network (SimpleRNN)** trained on the IMDB reviews dataset with TensorFlow/Keras.
 
-🌐 **Live app:** https://movie-sentiment-analyzer-001.streamlit.app/
+🌐 **Live app:** https://movie-sentiment-analyzer-01.streamlit.app/
 
 ## 🧠 Features
 
