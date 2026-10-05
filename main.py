@@ -1,18 +1,17 @@
 import os
-
-# Must be set BEFORE TensorFlow is imported.
-# On TF 2.16+ this makes tf.keras use legacy Keras 2 (tf-keras package),
-# which can load the .h5 model saved with TF 2.15. Harmless on TF 2.15.
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-
 import re
+import json
 import base64
+import urllib.request
 
 import numpy as np
 import streamlit as st
-from tensorflow.keras.datasets import imdb
-from tensorflow.keras.preprocessing import sequence
-from tensorflow.keras.models import load_model
+
+# ---------------------------------------------------------------------------
+# This app runs the trained SimpleRNN with pure NumPy, so it needs no
+# TensorFlow on the server. The weights in SimpleRNN/model_weights.npz were
+# exported from SimpleRNN/simple_rnn_imdb.h5 and give the same predictions.
+# ---------------------------------------------------------------------------
 
 # --- Constants (must match training in SimpleRNN/simplernn.ipynb) ---
 VOCAB_SIZE = 10000      # num_words used in imdb.load_data
@@ -21,7 +20,9 @@ INDEX_OFFSET = 3        # IMDB reserves 0=padding, 1=start, 2=unknown
 PAD, START, OOV = 0, 1, 2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "SimpleRNN", "simple_rnn_imdb.h5")
+WEIGHTS_PATH = os.path.join(BASE_DIR, "SimpleRNN", "model_weights.npz")
+WORD_INDEX_PATH = os.path.join(BASE_DIR, "imdb_word_index.json")
+WORD_INDEX_URL = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/imdb_word_index.json"
 BG_IMAGE_PATH = os.path.join(BASE_DIR, "Movie Review.jpg")
 
 st.set_page_config(page_title="Movie Review Sentiment Analyzer", page_icon="🎬", layout="centered")
@@ -29,10 +30,18 @@ st.set_page_config(page_title="Movie Review Sentiment Analyzer", page_icon="🎬
 
 # --- Cached resources: loaded once, not on every button click ---
 @st.cache_resource
-def load_resources():
-    model = load_model(MODEL_PATH)
-    word_index = imdb.get_word_index()
-    return model, word_index
+def load_weights():
+    w = np.load(WEIGHTS_PATH)
+    return {k: w[k] for k in w.files}
+
+
+@st.cache_resource
+def load_word_index():
+    # Use a local copy if present, otherwise download the same file Keras uses.
+    if not os.path.exists(WORD_INDEX_PATH):
+        urllib.request.urlretrieve(WORD_INDEX_URL, WORD_INDEX_PATH)
+    with open(WORD_INDEX_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 @st.cache_data
@@ -43,7 +52,19 @@ def get_base64_of_local_image(image_path):
         return base64.b64encode(img_file.read()).decode()
 
 
-model, word_index = load_resources()
+weights = load_weights()
+word_index = load_word_index()
+
+
+# --- Model forward pass (Embedding -> SimpleRNN(ReLU) -> Dense(sigmoid)) ---
+def rnn_predict(sequence):
+    x = weights["embeddings"][sequence]                 # (500, 128) embedding lookup
+    h = np.zeros(weights["rnn_bias"].shape[0], dtype=np.float32)
+    W, U, b = weights["rnn_kernel"], weights["rnn_recurrent_kernel"], weights["rnn_bias"]
+    for t in range(x.shape[0]):                          # h_t = ReLU(x_t W + h_(t-1) U + b)
+        h = np.maximum(0.0, x[t] @ W + h @ U + b)
+    z = float((h @ weights["dense_kernel"] + weights["dense_bias"])[0])
+    return 1.0 / (1.0 + np.exp(-z))                      # sigmoid -> P(positive)
 
 
 # --- Text preprocessing (mirrors how the IMDB training data was encoded) ---
@@ -63,20 +84,25 @@ def encode_word(word):
     return idx
 
 
+def pad_sequence(encoded):
+    # Same as keras pad_sequences(padding="pre", truncating="pre")
+    encoded = encoded[-MAX_LEN:]
+    padded = np.full(MAX_LEN, PAD, dtype=np.int64)
+    padded[MAX_LEN - len(encoded):] = encoded
+    return padded
+
+
 def preprocess_text(text):
     words = tokenize(text)
     encoded = [START] + [encode_word(w) for w in words]   # training sequences start with 1
-    padded = sequence.pad_sequences(
-        [encoded], maxlen=MAX_LEN, padding="pre", truncating="pre", value=PAD
-    )
     known = sum(1 for idx in encoded[1:] if idx != OOV)
-    return padded, len(words), known
+    return pad_sequence(encoded), len(words), known
 
 
 # --- Prediction ---
 def predict_sentiment(text):
     data, n_words, n_known = preprocess_text(text)
-    prob_positive = float(model.predict(data, verbose=0)[0][0])
+    prob_positive = rnn_predict(data)
     sentiment = "Positive" if prob_positive > 0.5 else "Negative"
     confidence = prob_positive if sentiment == "Positive" else 1.0 - prob_positive
     return sentiment, confidence, prob_positive, n_words, n_known
@@ -143,7 +169,7 @@ st.markdown("""
     <div class="title-box">
         <h1>🎬 Movie Review Sentiment Analyzer</h1>
         <div class="description">
-            A SimpleRNN model trained on 25,000 IMDB reviews.<br>
+            A SimpleRNN model trained on 25,000 IMDB reviews (84% test accuracy).<br>
             Enter any movie review to see whether it's classified as <strong>Positive</strong> or <strong>Negative</strong>.
         </div>
     </div>
@@ -167,7 +193,7 @@ if st.button("Analyze Review"):
         else:
             st.error(f"Sentiment: **{sentiment}** 😞")
 
-        st.progress(confidence, text=f"Confidence: {confidence:.1%}")
+        st.progress(float(confidence), text=f"Confidence: {confidence:.1%}")
 
         with st.expander("Details"):
             st.write(f"P(positive) from sigmoid output: `{prob_positive:.4f}`")
@@ -179,6 +205,6 @@ if st.button("Analyze Review"):
 # --- Footer ---
 st.markdown("""
     <div class="footer">
-        © 2025 Movie Sentiment Analyzer | Built with Streamlit & TensorFlow | Harsh Sharma, IIT Bhubaneswar
+        © 2025 Movie Sentiment Analyzer | Built with Streamlit & NumPy (model trained in TensorFlow) | Harsh Sharma, IIT Bhubaneswar
     </div>
 """, unsafe_allow_html=True)
